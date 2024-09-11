@@ -1,0 +1,48 @@
+{
+	"jobConfig": {
+		"name": "eulergluejob",
+		"description": "",
+		"role": "arn:aws:iam::666243375423:role/AWSGlueServiceRole",
+		"command": "glueetl",
+		"version": "4.0",
+		"runtime": null,
+		"workerType": "G.1X",
+		"numberOfWorkers": 5,
+		"maxCapacity": 5,
+		"jobRunQueuingEnabled": true,
+		"maxRetries": 0,
+		"timeout": 2880,
+		"maxConcurrentRuns": 1,
+		"security": "none",
+		"scriptName": "eulergluejob.py",
+		"scriptLocation": "s3://euler-data-lake/script/",
+		"language": "python-3",
+		"spark": false,
+		"sparkConfiguration": "standard",
+		"jobParameters": [],
+		"tags": [
+			{
+				"key": "created_by",
+				"value": "hakn",
+				"existing": false
+			}
+		],
+		"jobMode": "DEVELOPER_MODE",
+		"createdOn": "2024-09-08T16:22:00.392Z",
+		"developerMode": true,
+		"connectionsList": [],
+		"temporaryDirectory": "s3://aws-glue-assets-666243375423-us-east-1/temporary/",
+		"etlAutoScaling": true,
+		"etlAutoTuning": true,
+		"bookmark": "job-bookmark-disable",
+		"sparkPath": "s3://euler-data-lake/logs/",
+		"flexExecution": false,
+		"minFlexWorkers": null,
+		"maintenanceWindow": null,
+		"pythonPath": null,
+		"glueHiveMetastore": true
+	},
+	"hasBeenSaved": false,
+	"usageProfileName": null,
+	"script": "import sys\r\nfrom awsglue.transforms import *\r\nfrom awsglue.utils import getResolvedOptions\r\nfrom pyspark.context import SparkContext\r\nfrom awsglue.context import GlueContext\r\nfrom awsglue.job import Job\r\nfrom pyspark.sql import functions as F\r\nfrom pyspark.sql.types import StructType, StructField, StringType, LongType, ArrayType\r\n\r\nimport boto3\r\nimport io\r\nimport pandas as pd\r\nfrom pyspark.sql import SparkSession\r\nfrom pyspark.sql.functions import round\r\n\r\n# Get arguments\r\nargs = getResolvedOptions(sys.argv, ['name', 'bucket'])\r\nsc = SparkContext()\r\nglueContext = GlueContext(sc)\r\nspark = glueContext.spark_session\r\njob = Job(glueContext)\r\n\r\n# Parameters from the event or predefined\r\nprocessing_name = args['name']\r\nprocessing_bucket = args['bucket']\r\nbucket_output = 'euler-trusted-bucket'\r\ntemporary_folder = 'temporary_output_directory/'\r\nparquet_filename = processing_name.replace(\".csv\", \".parquet\")\r\n\r\n# Initialize boto3 client\r\ns3 = boto3.client('s3')\r\n\r\n# Read the CSV file from S3 into a Spark DataFrame\r\ninput_path = f\"s3://{processing_bucket}/{processing_name}\"\r\ndf = spark.read.csv(input_path, \r\n                     header=True, \r\n                     inferSchema=True, \r\n                     escape='\"', \r\n                     quote='\"')\r\n\r\n# Pre-process data\r\nalert_df = df.select(\r\n    \"_index\",\r\n    F.from_json(F.col(\"alert\"), \"struct<_id:long, alert_id:string, timestamp:string, device_product:string, count:string, logsource:string>\").alias(\"alert\")\r\n)\r\n\r\nalert_df = alert_df.withColumn(\"logsource\", F.col(\"alert.logsource\")) \\\r\n                   .withColumn(\"device_product\", F.col(\"alert.device_product\")) \\\r\n                   .withColumn(\"timestamp\", F.from_unixtime(F.col(\"alert.timestamp\") / 1000)) \\\r\n                   .drop(\"alert\") \\\r\n                   .withColumn(\"logsource\", F.when(F.col(\"logsource\").isNull(), \"none\").otherwise(F.col(\"logsource\"))) \\\r\n                   .withColumnRenamed(\"logsource\", \"logsource_kian\")\r\n\r\n# Process the \"events\" column\r\nevents_schema = ArrayType(StructType([\r\n    StructField(\"category\", StringType(), True),\r\n    StructField(\"client_id\", StringType(), True),\r\n    StructField(\"computer_name\", StringType(), True),\r\n    StructField(\"customer_group\", StringType(), True),\r\n    StructField(\"device_product\", StringType(), True),\r\n    StructField(\"duser\", StringType(), True),\r\n    StructField(\"event_id\", StringType(), True),\r\n    StructField(\"extra_data\", StringType(), True),\r\n    StructField(\"group_domain\", StringType(), True),\r\n    StructField(\"group_name\", StringType(), True),\r\n    StructField(\"group_sid\", StringType(), True),\r\n    StructField(\"last_updated\", StringType(), True),\r\n    StructField(\"local_timestamp\", StringType(), True),\r\n    StructField(\"log_name\", StringType(), True),\r\n    StructField(\"log_parser\", StringType(), True),\r\n    StructField(\"log_source\", StringType(), True),\r\n    StructField(\"message\", StringType(), True),\r\n    StructField(\"organization_group\", StringType(), True),\r\n    StructField(\"process_id\", StringType(), True),\r\n    StructField(\"raw_json\", StringType(), True),\r\n    StructField(\"reference\", StringType(), True),\r\n    StructField(\"referer\", StringType(), True),\r\n    StructField(\"release_level\", StringType(), True),\r\n    StructField(\"server_id\", StringType(), True),\r\n    StructField(\"severity\", StringType(), True),\r\n    StructField(\"shift\", StringType(), True),\r\n    StructField(\"signature_id\", StringType(), True),\r\n    StructField(\"source_log\", StringType(), True),\r\n    StructField(\"source_name\", StringType(), True),\r\n    StructField(\"status\", StringType(), True),\r\n    StructField(\"sub_category\", StringType(), True),\r\n    StructField(\"target_user_name\", StringType(), True),\r\n    StructField(\"target_user_sid\", StringType(), True),\r\n    StructField(\"user_domain\", StringType(), True),\r\n    StructField(\"user_logon_id\", StringType(), True),\r\n    StructField(\"user_name\", StringType(), True),\r\n    StructField(\"user_privilege_list\", StringType(), True),\r\n    StructField(\"user_sid\", StringType(), True),\r\n    StructField(\"user_update\", StringType(), True)\r\n]))\r\n\r\nevents_df = df.select(\r\n    \"_index\",\r\n    F.from_json(F.col(\"events\"), events_schema).alias(\"parsed_events\")\r\n)\r\n\r\nevents_df = events_df.selectExpr(\"_index\", \"explode(parsed_events) as event\").select(\"_index\", \"event.*\") \\\r\n                     .withColumnRenamed(\"device_product\", \"origin_device_product\") \\\r\n                     .filter(F.col(\"origin_device_product\") != \"KIAN\")\r\n\r\n# Concatenate DataFrames\r\nselected_df = df.select(\"_index\", \"alert_id\", \"rule_id\", \"tagged\")\r\nselected_alert_df = alert_df.select(\"_index\", \"timestamp\", \"device_product\", \"logsource_kian\")\r\n\r\ndf_ = selected_df.join(events_df, on=\"_index\", how=\"outer\") \\\r\n                 .join(selected_alert_df, on=[\"_index\"], how=\"outer\") \\\r\n                 .dropna(how='all')\r\n\r\n# Select columns for reporting task\r\ndf_report = df_.select(\"timestamp\", \"alert_id\", \"rule_id\", \"origin_device_product\", \"device_product\", \"logsource_kian\", \"tagged\").dropDuplicates()\r\n\r\n\r\n# Repartition to a single partition for a single output file\r\ndf_report = df_report.coalesce(1)\r\n\r\n# Write the DataFrame back to S3 as Parquet (to a temporary directory)\r\noutput_path = f\"s3://{bucket_output}/{temporary_folder}\"\r\ndf_report.write.parquet(output_path, mode='overwrite')\r\n\r\n# Rename the part file to the desired file name\r\ns3 = boto3.client('s3')\r\nresponse = s3.list_objects_v2(Bucket=bucket_output, Prefix=temporary_folder)\r\n\r\n# Check if any objects were returned\r\nif 'Contents' in response:\r\n    # Get the part file name (Parquet files usually have the extension .parquet)\r\n    part_file = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.parquet')][0]\r\n\r\n    # Define the new file name\r\n    output_file = \"processed_\" + parquet_filename\r\n\r\n    # Copy the part file to the desired file name\r\n    s3.copy_object(Bucket=bucket_output, CopySource=f'{bucket_output}/{part_file}', Key=output_file)\r\n\r\n    # Delete the temporary folder and files\r\n    for obj in response['Contents']:\r\n        s3.delete_object(Bucket=bucket_output, Key=obj['Key'])"
+}
