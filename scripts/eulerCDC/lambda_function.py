@@ -25,9 +25,6 @@ def lambda_handler(event, context):
                 process_large_file(bucket, name, version_id)
             else:
                 process_small_file(bucket, name, size, version_id)
-        
-        elif 'Delete' in event_name:
-            handle_deletion(name, version_id)
     
     return {
         'statusCode': 200,
@@ -107,15 +104,3 @@ def call_glue_job(bucket, filename):
 def delete_temp_file(bucket, filename):
     s3.delete_object(Bucket=bucket, Key=filename)
     print(f"Deleted temp file: {filename}")
-
-def handle_deletion(name, version_id):
-    print(f"Handling deletion for {name} with version {version_id}")
-    delete_from_s3(name)
-
-def delete_from_s3(name):
-    DESTINATION_BUCKET_NAME = "euler-trusted-bucket"
-    DESTINATION_OBJECT = "processed_" + name.replace(".csv", ".parquet")
-    try:
-        s3.delete_object(Bucket=DESTINATION_BUCKET_NAME, Key=DESTINATION_OBJECT)
-    except Exception as e:
-        print(f"Error deleting from S3: {e}")
